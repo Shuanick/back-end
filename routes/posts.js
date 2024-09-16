@@ -6,15 +6,7 @@ const path = require('path');
 const Post = require('../models/post');
 
 // 設定圖片上傳存儲
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, 'uploads/'); // 指定圖片上傳目錄
-  },
-  filename: function (req, file, cb) {
-    cb(null, Date.now() + path.extname(file.originalname)); // 使用當前時間戳作為文件名
-  }
-});
-
+const storage = multer.memoryStorage();
 const upload = multer({ storage: storage });
 
 // 創建新帖子
@@ -25,9 +17,10 @@ router.post('/', upload.single('image'), async (req, res) => {
   }
 
   try {
+    const imageUrl = req.file ? await uploadImageToGCS(req.file) : null;
     const newPost = new Post({
       content,
-      image: req.file ? `/uploads/${path.basename(req.file.path)}` : null
+      image: imageUrl
     });
     await newPost.save();
     res.status(201).json({ message: 'Post created successfully', data: newPost });
@@ -36,6 +29,27 @@ router.post('/', upload.single('image'), async (req, res) => {
     res.status(500).send('Error creating post: ' + error.message);
   }
 });
+
+async function uploadImageToGCS(file) {
+  const bucketName = 'nick_product_bucket';
+  const storage = new Storage({
+    keyFilename: 'F:/googleSDK/graphic-charter-435810-k9-6d097b49fa5f.json'
+  });
+  const bucket = storage.bucket(bucketName);
+  const blob = bucket.file(Date.now() + path.extname(file.originalname));
+  const blobStream = blob.createWriteStream({
+    resumable: false,
+  });
+
+  return new Promise((resolve, reject) => {
+    blobStream.on('error', reject);
+    blobStream.on('finish', () => {
+      const publicUrl = `https://storage.googleapis.com/${bucketName}/${blob.name}`;
+      resolve(publicUrl);
+    });
+    blobStream.end(file.buffer);
+  });
+}
 
 // 獲取所有帖子
 router.get('/', async (req, res) => {
